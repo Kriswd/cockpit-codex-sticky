@@ -1,0 +1,10 @@
+*.exe
+*.log
+*.zip
+.DS_Store
+LAST-*.txt
+PARENT_HANDOFF.md
+__pycache__/
+*.pyc
+.env
+*.bak*
