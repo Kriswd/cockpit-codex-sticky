@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 setlocal EnableExtensions
 title 重装 Cockpit Turn-State 版 cliproxy

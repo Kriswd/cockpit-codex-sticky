@@ -1,15 +1,16 @@
-﻿# cockpit-effort-detect
+# cockpit-codex-sticky
 
-Cockpit Tools `cockpit-cliproxy` 社区补丁，一个仓库两件事：
+通俗名：**Cockpit Codex 会话粘性**
 
-1. **主功能（类似 CPA）Turn-State 粘性** — 缓存并回注 `X-Codex-Turn-State`（292 字节），同一会话尽量粘在同一账号/路由；日志 `[turn-state]`
-2. **附带** `[effort-detect]` — 记录请求推理档位、`reasoning_tokens`、516 截断指纹
+给 Cockpit Tools 的本地 Codex 反代（cockpit-cliproxy）加上类似 CPA 的能力：把同一次对话「粘」在同一账号/路由上（X-Codex-Turn-State），日志里搜 [turn-state]。  
+顺带提供 [effort-detect]：看推理档位、推理 token、有没有 516 截断。
 
-**中文详细部署：[DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)**（推荐客户按此操作）
+中文详细部署：[DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)
 
-仓库：https://github.com/Kriswd/cockpit-effort-detect
+仓库：https://github.com/Kriswd/cockpit-codex-sticky  
+（由 cockpit-effort-detect 更名而来，旧链接会跳转）
 
-> 非官方补丁。Cockpit 客户端升级可能覆盖 `cockpit-cliproxy.exe`，升级后请重新部署。
+> 非官方补丁。Cockpit 升级后若覆盖了 cockpit-cliproxy.exe，请重新部署。
 
 ## 主效果：Turn-State（你要分享给别人测的那个）
 
@@ -29,8 +30,8 @@ CPA / CLIProxyAPI 一类网关会用上游返回的 `X-Codex-Turn-State` 做会�
 ## 快速开始
 
 ```powershell
-git clone https://github.com/Kriswd/cockpit-effort-detect.git
-cd cockpit-effort-detect
+git clone https://github.com/Kriswd/cockpit-codex-sticky.git
+cd cockpit-codex-sticky
 
 $env:COCKPIT_TURNSTATE_DIR = "D:\path\to\cockpit-tools-turnstate"
 $env:COCKPIT_TOOLS_DIR = "D:\path\to\Cockpit Tools"

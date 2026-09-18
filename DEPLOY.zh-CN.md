@@ -1,6 +1,7 @@
-﻿# 详细部署文档（中文）
+# 详细部署文档（中文）
 
-仓库：https://github.com/Kriswd/cockpit-effort-detect
+仓库：https://github.com/Kriswd/cockpit-codex-sticky  
+（原名 cockpit-effort-detect，已更名；旧地址会跳转）
 
 本仓库同时提供：
 
@@ -66,8 +67,8 @@ CPA 一类代理会把它记下来，并在同会话后续请求里再带回去�
 ### 3.1 克隆
 
 ```powershell
-git clone https://github.com/Kriswd/cockpit-effort-detect.git
-cd cockpit-effort-detect
+git clone https://github.com/Kriswd/cockpit-codex-sticky.git
+cd cockpit-codex-sticky
 ```
 
 ### 3.2 设置路径
