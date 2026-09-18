@@ -1,83 +1,79 @@
 ﻿# 详细部署文档（中文）
 
-本文说明如何把 **cockpit-effort-detect** 部署到 Windows 上的 Cockpit Tools，并验收 `[effort-detect]` 日志是否生效。
-
 仓库：https://github.com/Kriswd/cockpit-effort-detect
+
+本仓库同时提供：
+
+| 优先级 | 能力 | 日志标签 | 像什么 |
+| --- | --- | --- | --- |
+| **主** | Turn-State 粘性：缓存/回注 `X-Codex-Turn-State` | `[turn-state]` | 类似 CPA 的会话粘性 |
+| 附 | 推理档位 / reasoning token / 516 指纹检测 | `[effort-detect]` | 观测用，不改路由 |
+
+客户若只想验证「和 CPA 类似的粘性」，按本文 **第 1～4 节** 即可；第 5 节起是附带检测能力。
 
 ---
 
-## 1. 这个补丁能做什么 / 不能做什么
+## 1. Turn-State 是什么效果
 
-### 能做
+上游 Codex 有时会在响应里带回约 **292 字节** 的 `X-Codex-Turn-State`。  
+CPA 一类代理会把它记下来，并在同会话后续请求里再带回去，减少账号/路由乱跳。
 
-- 在 `cockpit-cliproxy` 里增加 **`[effort-detect]`** 日志：
-  - 客户端请求的推理档位（如 `low` / `medium` / `high` / `xhigh` / `max`）
-  - 上游返回的 `reasoning_tokens`（含 SSE 流式尾部 usage）
-  - 是否命中 **516 截断指纹**（`reasoning_tokens == 518*n - 2`，例如 516、1034、1552）
-- 附带 turn-state 相关 helper（`cache.go` 等），用于粘性会话场景（需你的源码树已接入 turnstate 传输层）
+本补丁给 Cockpit 的 `cockpit-cliproxy` 加上同样思路：
 
-### 不能做（请先和管理预期对齐）
+1. 响应里出现合法 turn-state → **记住**（按 账号 + 模型 + 会话 键缓存，默认约 30 分钟）
+2. 后续同键请求若客户端没带该头 → **自动注入**
+3. 日志打 `[turn-state]`，方便确认有没有生效
 
-| 能力 | 本仓库是否包含 |
-| --- | --- |
-| DSH 界面里给模型选推理档位（dsh-effort-config） | 否 |
-| 检测「请求 astra、实际 luna」这类换模 | 否（可用 ModelTrace 等另测） |
-| 强制上游一定给你指定模型 | 否 |
-| 现成编译好的 `cockpit-cliproxy.exe` 安装包 | 否（需本机用 Go 编译） |
-| FlClash / 系统代理出网稳定性调优 | 否（网络侧配置，与本补丁无关） |
+### 做得到
 
-**结论：** 部署成功后，客户能得到和「本机补丁生效后」一样的 **检测日志能力**；不会自动拥有你本机整套周边工具链。
+- 多轮 / 续写场景下更稳的会话粘性（与 CPA 目标同类）
+- 用日志证明「记住了 / 注入了」
+
+### 做不到
+
+- 不能禁止上游把 `gpt-6-astra` 静默换成 `gpt-5.6-luna`
+- 不附带 DSH 推理档位 UI（那是别的插件）
+- 不附带预编译安装包（需本机 Go 编译替换 exe）
 
 ---
 
 ## 2. 环境要求
 
-请逐项确认：
-
-1. **Windows 10/11**
-2. 已安装并会用 **Cockpit Tools**，且本机 Codex API 走 sidecar：`cockpit-cliproxy.exe`（常见监听 `http://127.0.0.1:61227/v1`）
-3. **Go 工具链**（`go version` 能跑；建议 Go 1.22+）
-4. **Python 3**（部署脚本用）
-5. **一份可编译的 cliproxy 源码树**，且已存在目录：
+1. Windows 10/11  
+2. 已安装 Cockpit Tools，且 Codex API 走 `cockpit-cliproxy.exe`（常见 `http://127.0.0.1:61227/v1`）  
+3. Go（建议 1.22+，`go version` 可用）  
+4. Python 3（部署脚本用）  
+5. **可编译的 sidecar 源码树**，且已有：
 
 ```text
 <COCKPIT_TURNSTATE_DIR>\sidecars\cockpit-cliproxy\third_party\CLIProxyAPI\internal\turnstate
 ```
 
-以及 sidecar 根目录可 `go build`：
+以及可在该 sidecar 根目录 `go build`。
 
-```text
-<COCKPIT_TURNSTATE_DIR>\sidecars\cockpit-cliproxy\
-```
-
-> 若只有官方安装目录、没有上述源码树，**无法**仅靠本仓库完成替换。需要先准备/同步一份带 `internal/turnstate` 的 CLIProxyAPI / Cockpit sidecar 源码（与你平时编译 `cockpit-cliproxy.exe` 的那份一致）。
-
-6. 已安装的 Cockpit Tools 目录里有待替换的二进制，例如：
+6. 安装目录中有待替换二进制：
 
 ```text
 <COCKPIT_TOOLS_DIR>\cockpit-cliproxy.exe
 ```
 
+没有源码树则无法部署——本仓库只提供 `pkg-turnstate` 补丁文件与脚本，不含完整 Cockpit 源码。
+
 ---
 
-## 3. 部署步骤
+## 3. 部署步骤（主流程）
 
-### 3.1 获取本仓库
+### 3.1 克隆
 
 ```powershell
 git clone https://github.com/Kriswd/cockpit-effort-detect.git
 cd cockpit-effort-detect
 ```
 
-### 3.2 设置路径环境变量
-
-把下面两个路径改成客户自己的真实路径：
+### 3.2 设置路径
 
 ```powershell
-# 必填：含 sidecars\cockpit-cliproxy 的源码根
 $env:COCKPIT_TURNSTATE_DIR = "D:\path\to\cockpit-tools-turnstate"
-
-# 建议填写：已安装的 Cockpit Tools 目录（里面有 cockpit-cliproxy.exe）
 $env:COCKPIT_TOOLS_DIR = "D:\path\to\Cockpit Tools"
 ```
 
@@ -90,161 +86,140 @@ go version
 python --version
 ```
 
-两项 `Test-Path` 都应返回 `True`。
-
-### 3.3 一键部署
-
-在仓库根目录执行：
+### 3.3 一键编译替换
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Deploy-EffortDetect.ps1
 ```
 
-脚本会：
+脚本会把 `pkg-turnstate\`（含 **cache / transport / effort_detect**）拷进源码树、`go build`、备份并替换安装目录里的 `cockpit-cliproxy.exe`。
 
-1. 把 `pkg-turnstate\*` 拷进源码树的 `internal\turnstate`
-2. `go test` / `go build` 生成新的 `cockpit-cliproxy.exe`
-3. 停掉正在跑的 `cockpit-cliproxy` 进程
-4. 备份旧 exe，再覆盖安装目录里的 `cockpit-cliproxy.exe`
-
-也可以分步：
+也可：
 
 ```powershell
 python .\apply_effort_detect.py
 python .\build_and_replace.py
 ```
 
+若路径已写死在本机习惯目录，也可参考 `Reinstall-Cockpit-TurnState.bat`（需按客户路径改 SRC / INSTALL）。
+
 ### 3.4 重启 Cockpit Tools
 
-完全退出并重新打开 **Cockpit Tools**，确认 Codex API / sidecar 重新拉起（任务管理器里应重新出现 `cockpit-cliproxy.exe`）。
+完全退出再打开，确认新的 `cockpit-cliproxy.exe` 在跑。
 
-> Cockpit 客户端升级后，官方安装包常会 **覆盖** `cockpit-cliproxy.exe`。升级后请重新执行 3.3。
+> 客户端升级后 exe 常被覆盖，需重新执行 3.3。
 
 ---
 
-## 4. 验收（必须做）
+## 4. 主验收：`[turn-state]`
 
-### 4.1 发一笔会经过本地 API 的请求
+### 4.1 怎么测
 
-任选一种：
-
-- DSH / 其他客户端，Base URL 指向 Cockpit 本地 Codex API，例如 `http://127.0.0.1:61227/v1`
-- 或对本地 API 直接打一条 chat completions
-
-建议带上明确档位，例如 `reasoning_effort=xhigh`（若客户端 UI 可选则选极高/Xhigh）。
-
-### 4.2 查日志
-
-日志目录：
+1. 客户端（DSH / Codex 等）走本地 Cockpit API  
+2. 同一会话连续发 **至少 2～3 轮**（续写、工具调用、多步任务更易触发）  
+3. 打开日志：
 
 ```text
-%USERPROFILE%\.antigravity_cockpit\logs\
+%USERPROFILE%\.antigravity_cockpit\logs\codex-api.log.*
 ```
 
-文件名类似：`codex-api.log.YYYY-MM-DD`
+搜索：`[turn-state]`
 
-在最新日志中搜索：`[effort-detect]`
+### 4.2 成功时大致会看到
 
-成功时大致会看到：
+（措辞以你编译进二进制的中文日志为准，大意如下）
+
+- 第一次从上游 **记住** turn-state（长度 292）  
+- 后续请求 **注入** 已缓存的头  
+- 或说明为何跳过（长度不对、无会话键等）
+
+### 4.3 快速搜索
+
+```powershell
+$log = Get-ChildItem "$env:USERPROFILE\.antigravity_cockpit\logs\codex-api.log.*" |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Select-String -Path $log.FullName -Pattern '\[turn-state\]' | Select-Object -Last 30
+```
+
+### 4.4 主验收清单
+
+- [ ] 部署脚本成功，Cockpit 已重启  
+- [ ] 同会话多轮请求已发出  
+- [ ] 日志出现 `[turn-state]` 记住 / 注入类记录  
+- [ ] 已知：粘性 ≠ 换模修复  
+
+---
+
+## 5. 附带能力：`[effort-detect]`
+
+同一补丁二进制还会打出检测日志，便于判断「档位有没有带上、推理 token、是否像 516 截断」。
+
+搜索：`[effort-detect]`
+
+示例：
 
 ```text
 [effort-detect] 请求档位=xhigh 模型=gpt-6-astra 账号=codex_xxxx
-[effort-detect] 请求档位=xhigh 模型=gpt-6-astra 推理token=311 截断指纹=未命中 input=... output=... total=... 账号=codex_xxxx
+[effort-detect] 请求档位=xhigh 模型=gpt-6-astra 推理token=311 截断指纹=未命中 ...
 ```
 
 说明：
 
-- **请求档位**：客户端发出去的档位（证明有没有带上）
-- **推理token**：上游 usage 里的 reasoning tokens；流式响应需等流结束后才会出现在第二条日志
-- **截断指纹**：`未命中` 或命中 516 系列；命中不代表「换模」，只说明推理长度像被截断过
+- **请求档位**：客户端发出的 effort  
+- **推理token**：上游 usage；SSE 需等流结束  
+- **截断指纹**：是否像 `518*n-2` 截断  
 
-若只有请求档位、`推理token=-`：
+这只是观测，**不会**改模型路由。
 
-- 可能请求还在飞、或非流式/usage 字段缺失
-- 本补丁已包含 SSE **尾部**解析；若仍长期为 `-`，把该次 `requestId` 前后日志贴出排查
-
-### 4.3 可选：PowerShell 快速搜今天的日志
-
-```powershell
-$log = Get-ChildItem "$env:USERPROFILE\.antigravity_cockpit\logs\codex-api.log.*" |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-Select-String -Path $log.FullName -Pattern '\[effort-detect\]' | Select-Object -Last 20
-```
-
----
-
-## 5. 可选：codex-516-guard
-
-`Install-Codex516Guard.ps1` 用于安装/拉起一个 **独立** 的 516 截断续写代理（常见监听 `127.0.0.1:8787`）。
-
-注意：
-
-- 它 **不会** 自动接管 DSH → `61227` 的流量
-- 只有把客户端指到 guard 端口时才会生效
-- 与 `[effort-detect]` 日志是两件不同的事：一个是检测，一个是（可选）缓解截断
-
-没有 516 问题的客户可以跳过。
+可选组件 `Install-Codex516Guard.ps1` 是独立 516 续写代理，默认不接管 `61227`，仅在你把客户端指过去时生效。
 
 ---
 
 ## 6. 常见问题
 
-### Q1：`turnstate destination not found` / `sidecar root missing`
+### Q1：和 CPA 插件是不是一回事？
 
-未设对 `COCKPIT_TURNSTATE_DIR`，或源码树没有 `internal\turnstate`。先保证平时就能在该树里 `go build` 出 cliproxy。
+**目标同类**（turn-state 粘性），实现落在 Cockpit 的 Go sidecar 上，不是往 CPA 里装插件。客户需要的是 Cockpit + 可编译 cliproxy 源码，而不是 CPA 安装包。
 
-### Q2：编译失败
+### Q2：只有 Turn-State、不想要 effort-detect？
 
-- 确认在 `sidecars\cockpit-cliproxy` 下官方/现有工程本身能编译
-- 本补丁只覆盖 `internal\turnstate` 下若干文件；若你的树结构不同，需手动对齐 import 路径后再编
+当前 `transport.go` 两者绑在同一 RoundTrip。若只要粘性，需自行改源码去掉 `logEffortDetect` / `attachEffortDetect` 后再编译（进阶）。默认推荐两个都留着，日志量可接受。
 
-### Q3：替换 exe 时文件被占用
+### Q3：编译 / 找不到 turnstate 目录
 
-脚本会尝试结束 `cockpit-cliproxy`；若仍失败，先退出 Cockpit Tools 再跑 `build_and_replace.py`。
+检查 `COCKPIT_TURNSTATE_DIR` 是否指向含 `sidecars\cockpit-cliproxy\...` 的树，且该树本身原先就能 `go build`。
 
-### Q4：重启后日志里没有 `[effort-detect]`
+### Q4：替换 exe 失败
 
-1. 确认实际运行的是刚替换的 exe（看进程路径、文件修改时间）
-2. 确认请求确实打到该 sidecar（端口、API Key）
-3. Cockpit 是否又拉起了另一份内置二进制
+先退出 Cockpit Tools，再跑部署脚本。
 
-### Q5：客户感觉「还是蠢 / 还是慢」
+### Q5：有 `[effort-detect]` 但没有 `[turn-state]`
 
-本补丁 **只负责看得见档位与截断指纹**。若 `response.model` 或指纹显示上游不是你以为的模型，那是账号/上游路由问题，不是本补丁能「改回」的。
+可能本轮上游未返回合法 292 字节头，或会话键为空。换多轮工具任务再试，并把相关日志段（可打码）留下。
 
-### Q6：和官方 Codex 客户端比更不稳（TLS handshake EOF）
+### Q6：粘性有了，模型还是 luna
 
-多半是出网代理路径问题（例如系统 HTTP 代理 + TUN 双层），与本补丁无关。可对照：官方 Codex 是否也走同一 HTTP 代理；必要时让 cliproxy 与官方客户端走同一出网方式。
+粘性只保证「更可能同一路由/账号上下文」，不保证模型 ID。换模需换号、换上游或接受现状；可用 ModelTrace / `response.model` 另验。
 
 ---
 
-## 7. 推荐验收清单（给客户打勾）
-
-- [ ] `go version` / `python --version` 正常
-- [ ] `COCKPIT_TURNSTATE_DIR`、`COCKPIT_TOOLS_DIR` 路径正确
-- [ ] `Deploy-EffortDetect.ps1` 成功结束
-- [ ] 已重启 Cockpit Tools
-- [ ] 发过至少 1 次经本地 API 的请求
-- [ ] 日志中出现带 **请求档位** 的 `[effort-detect]`
-- [ ] 流结束后出现带 **推理token** 的 `[effort-detect]`（或明确记录 usage 缺失）
-- [ ] 已知：本补丁不解决换模，不附带 DSH 档位插件
-
----
-
-## 8. 目录说明
+## 7. 目录说明
 
 ```text
 cockpit-effort-detect/
-  README.md                 # 英文简介
-  DEPLOY.zh-CN.md           # 本中文详细文档
-  LICENSE
-  pkg-turnstate/            # 打进 internal/turnstate 的 Go 源码
-  apply_effort_detect.py    # 拷贝源码
-  build_and_replace.py      # 编译并替换 exe
-  Deploy-EffortDetect.ps1   # 一键部署
-  RUN-ALL-ON-WINDOWS.ps1    # 可选总入口
-  Install-Codex516Guard.ps1 # 可选 516-guard
+  README.md
+  DEPLOY.zh-CN.md              # 本文（Turn-State 为主）
+  Reinstall-Cockpit-TurnState.bat  # 路径模板，部署前请改
+  pkg-turnstate/
+    cache.go                   # Turn-State 缓存（主）
+    transport.go               # 注入/捕获 + effort-detect 挂钩
+    effort_detect.go           # 附带检测
+    *_test.go
+  apply_effort_detect.py
+  build_and_replace.py
+  Deploy-EffortDetect.ps1
+  Install-Codex516Guard.ps1    # 可选
+  RUN-ALL-ON-WINDOWS.ps1
 ```
 
-有问题请带着：操作系统、`go version`、两个环境变量路径、部署脚本完整输出、以及一段含 `requestId` 的 `codex-api` 日志（可打码账号邮箱）。
+问题反馈请带：系统、`go version`、两个环境变量路径、部署输出、以及含 `[turn-state]` / `requestId` 的日志片段（打码邮箱与 token）。
