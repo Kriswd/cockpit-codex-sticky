@@ -1,62 +1,38 @@
-# cockpit-effort-detect
+﻿# cockpit-effort-detect
 
-Community patch for **Cockpit Tools** `cockpit-cliproxy`: sticky `X-Codex-Turn-State` helpers plus `[effort-detect]` logging.
+Cockpit Tools `cockpit-cliproxy` 社区补丁：`[effort-detect]` 推理档位 / `reasoning_tokens` / 516 截断指纹日志，以及 turn-state helper。
 
-It records the requested reasoning effort and, when present, `reasoning_tokens` / 516-style truncation fingerprints from upstream usage. Useful when DSH / local Codex API traffic may be silently truncated or feel "dumbed down".
+**中文详细部署请看：[DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)**（推荐客户直接按该文档操作）。
 
-> This is an unofficial patch. Cockpit client updates can overwrite `cockpit-cliproxy.exe` — re-run the deploy script (or your rebuild bat) after upgrading.
+仓库：https://github.com/Kriswd/cockpit-effort-detect
 
-## What you get
+> 非官方补丁。Cockpit 客户端升级可能覆盖 `cockpit-cliproxy.exe`，升级后需重新部署。
 
-- `pkg-turnstate/` — Go sources for `internal/turnstate`
-  - `effort_detect.go` — parse effort + usage (including SSE tail)
-  - `transport.go` — RoundTrip hooks that emit `[effort-detect]` lines
-  - `cache.go` — turn-state cache helpers
-- `apply_effort_detect.py` — copy sources into your CLIProxyAPI tree
-- `build_and_replace.py` — `go build` and replace installed `cockpit-cliproxy.exe`
-- `Deploy-EffortDetect.ps1` / `RUN-ALL-ON-WINDOWS.ps1` — one-shot Windows deploy
-- `Install-Codex516Guard.ps1` — optional companion install for a standalone 516-guard proxy
-
-## Requirements
-
-- Windows (scripts are PowerShell / Python)
-- Go toolchain
-- A Cockpit Tools install that uses the Go sidecar `cockpit-cliproxy.exe`
-- A source tree that contains  
-  `sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/turnstate`  
-  (set `COCKPIT_TURNSTATE_DIR` to that checkout root)
-
-## Quick start
+## 快速开始（摘要）
 
 ```powershell
-git clone https://github.com/<OWNER>/cockpit-effort-detect.git
+git clone https://github.com/Kriswd/cockpit-effort-detect.git
 cd cockpit-effort-detect
 
-# Point at YOUR patched / vendored cockpit-cliproxy source tree
 $env:COCKPIT_TURNSTATE_DIR = "D:\path\to\cockpit-tools-turnstate"
-# Optional: installed Cockpit Tools folder (contains cockpit-cliproxy.exe)
 $env:COCKPIT_TOOLS_DIR = "D:\path\to\Cockpit Tools"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Deploy-EffortDetect.ps1
 ```
 
-Restart **Cockpit Tools**, send one request through the local Codex API (e.g. DSH → `http://127.0.0.1:61227/v1`), then check:
+重启 Cockpit Tools，经本地 Codex API（如 `http://127.0.0.1:61227/v1`）发一条请求，在：
 
 `%USERPROFILE%\.antigravity_cockpit\logs\codex-api.log.*`
 
-Look for lines like:
+中搜索 `[effort-detect]`。
 
-```text
-[effort-detect] 请求档位=xhigh 模型=gpt-6-astra 账号=codex_xx
-[effort-detect] 请求档位=xhigh 模型=gpt-6-astra 推理token=311 截断指纹=未命中 账号=codex_xx
-```
+## 能力边界
 
-## Notes / limits
+- **有**：请求档位、推理 token、516 截断指纹日志（含 SSE 尾部解析）
+- **无**：DSH 档位 UI 插件、换模指纹（ModelTrace）、强制指定上游模型、预编译安装包、代理/TUN 网络调优
 
-- Detects **requested effort**, **reasoning token counts**, and the **516 truncation fingerprint**. It does **not** by itself prevent upstream model swaps (e.g. astra served as luna).
-- Streaming responses need the SSE-tail parser (included); older head-only sniffers often showed `推理token=-`.
-- Optional `codex-516-guard` can continue/fold truncated streams; it is separate from DSH→61227 unless you point clients at the guard port.
+完整说明、验收清单与排障见 [DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)。
 
 ## License
 
-Sources are provided for testing and interoperability with Cockpit Tools / CLIProxyAPI-based sidecars. Respect upstream project licenses when redistributing binaries.
+MIT。再分发二进制时请同时遵守 Cockpit Tools / CLIProxyAPI 等上游许可。
